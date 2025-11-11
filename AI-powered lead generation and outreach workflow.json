@@ -1,0 +1,417 @@
+{
+  "name": "AI-powered lead generation and outreach workflow",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        -448
+      ],
+      "id": "09c7ec48-e1e8-487e-b182-fc08a1418f21",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "url": "https://api.apify.com/v2/datasets/oM3ZCATlPRK0RofwK/items?format=json&clean=true",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        96,
+        -240
+      ],
+      "id": "c70a290d-7e3b-48f1-8be0-4cd3c63ddafa",
+      "name": "Apify : HTTP Request"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a795d204-ebe3-4ada-924e-5d3eb2fbbf80",
+              "name": "external_id",
+              "value": "={{$json.placeId || $json.id || $json.title}}",
+              "type": "string"
+            },
+            {
+              "id": "c61d453c-1689-4cd9-8b25-855c01b0a1d4",
+              "name": "company_name",
+              "value": "={{$json.title}}",
+              "type": "string"
+            },
+            {
+              "id": "cdc90a16-2c83-4678-b4e2-01049c82fc3a",
+              "name": "email",
+              "value": "={{$json.email || \"Not Available\"}}",
+              "type": "string"
+            },
+            {
+              "id": "51eed906-4b4c-46dc-a097-9d110ef862af",
+              "name": "website",
+              "value": "={{$json.website}}",
+              "type": "string"
+            },
+            {
+              "id": "cf32c665-e76f-4aaa-8e9c-fb16cc6e660c",
+              "name": "domain",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "6135665b-b3b9-4f9d-9537-ce83f9940d9c",
+              "name": "summary",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "6923218f-d634-4944-82c0-478674ab31c8",
+              "name": "email_html",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "49e5f88d-11e0-4d9c-83f7-26b96eedf56e",
+              "name": "status",
+              "value": "\"New\"",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        224,
+        -416
+      ],
+      "id": "20ce08df-99e9-46c6-8d20-8b92dca97078",
+      "name": "Map Fields"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nfunction extractDomainFromWebsite(website) {\n  if (!website) return \"\";\n  let s = String(website).trim();\n\n  // If protocol missing, add https://\n  if (!/^https?:\\/\\//i.test(s)) s = \"https://\" + s;\n\n  // Try URL() first\n  try {\n    const u = new URL(s);\n    return u.hostname.replace(/^www\\./i, \"\");\n  } catch (e) {\n    // Fallback regex (very forgiving)\n    const m = s.match(/^(?:https?:\\/\\/)?([^\\/?#\\s]+)/i);\n    return m ? m[1].replace(/^www\\./i, \"\") : \"\";\n  }\n}\n\nfunction extractDomainFromEmail(email) {\n  if (!email) return \"\";\n  const m = String(email).trim().match(/@([^>\\s]+)$/);\n  return m ? m[1].replace(/^www\\./i, \"\") : \"\";\n}\n\nreturn items.map(item => {\n  const data = item.json || {};\n  let domain = \"\";\n\n  // 1) Try website\n  domain = extractDomainFromWebsite(data.website);\n\n  // 2) Fallback to email\n  if (!domain) domain = extractDomainFromEmail(data.email);\n\n  // 3) If still nothing, leave empty (we'll log later)\n  return { json: { ...data, domain } };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        -240
+      ],
+      "id": "def20905-8fe3-4f83-b503-0dd15b663fa2",
+      "name": "Domain extractor"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://router.huggingface.co/hf-inference/models/facebook/bart-large-cnn",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer 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"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"inputs\": \"Summarize this company website content: {{$json.website}}\"\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        544,
+        -416
+      ],
+      "id": "f2d7b0be-eeab-4817-adb0-f051848cfaca",
+      "name": "Hugging face : Summary Generator"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => {\n  let summary = item.json.summary_text || \"\";\n\n  // 🧹 Clean up the text\n  summary = summary\n    // Remove URLs (http, https, www)\n    .replace(/https?:\\/\\/[^\\s]+/g, \"\")\n    .replace(/www\\.[^\\s]+/g, \"\")\n    // Remove the prompt text like \"Summarize this company website content:\"\n    .replace(/Summarize this company website content[:\\s]*/gi, \"\")\n    // Remove redundant words like \"company website content:\"\n    .replace(/company website content[:\\s]*/gi, \"\")\n    // Replace extra spaces and line breaks\n    .replace(/\\s+/g, \" \")\n    // Trim any leading/trailing spaces\n    .trim();\n\n  // 🪶 Capitalize the first letter for better readability\n  if (summary.length > 0) {\n    summary = summary.charAt(0).toUpperCase() + summary.slice(1);\n  }\n\n  return {\n    json: {\n      ...item.json,\n      clean_summary: summary || \"No clear summary available\"\n    }\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        704,
+        -240
+      ],
+      "id": "f771bab1-d17e-47e1-a89a-ff721e020775",
+      "name": "Clean Summary"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://router.huggingface.co/hf-inference/models/mistralai/Mistral-7B-Instruct-v0.2",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer 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"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"inputs\": \"You are a helpful SDR for E2M Solutions, a white-label digital agency. Write a warm, concise 2–3 sentence outreach email for the company (domain: {{ $json.domain || '' }}). Use this summary: {{ $json.clean_summary || '' }}. Make it sound personal, professional, and include a friendly CTA.\",\n  \"parameters\": {\n    \"temperature\": 0.7,\n    \"max_new_tokens\": 150\n  }\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        864,
+        -400
+      ],
+      "id": "26a90e26-0ff8-4687-a97f-faf2e62e9ce4",
+      "name": "Hugging Face : Email Draft"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1-GtIinevnG2gnkCSBCKa_hl1B3OZxFyO8PIc7mfiUN0",
+          "mode": "list",
+          "cachedResultName": "E2M_Lead_Outreach",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1-GtIinevnG2gnkCSBCKa_hl1B3OZxFyO8PIc7mfiUN0/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1-GtIinevnG2gnkCSBCKa_hl1B3OZxFyO8PIc7mfiUN0/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "external_id": "={{$node[\"Domain extractor\"].json[\"external_id\"]}}",
+            "company_name": "={{$node[\"Domain extractor\"].json[\"company_name\"]}}",
+            "email": "={{$node[\"Domain extractor\"].json[\"email\"]}}",
+            "website": "={{$node[\"Domain extractor\"].json[\"website\"]}}",
+            "domain": "={{$node[\"Domain extractor\"].json[\"domain\"]}}",
+            "summary": "={{$json.clean_summary}}\n",
+            "email_html": "={{$node[\"Domain extractor\"].json[\"email_html\"]}}",
+            "status": "\"New\""
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "external_id",
+              "displayName": "external_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "company_name",
+              "displayName": "company_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "website",
+              "displayName": "website",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "domain",
+              "displayName": "domain",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "summary",
+              "displayName": "summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_html",
+              "displayName": "email_html",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1072,
+        -240
+      ],
+      "id": "34f27fab-3386-4f65-864d-cef2c87e5854",
+      "name": "Append rows in Lead sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "ggxeEqrq22GmU0Cl",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "pinData": {
+    "Hugging Face : Email Draft": [
+      {
+        "json": {
+          "name": "First item",
+          "code": 1
+        }
+      },
+      {
+        "json": {
+          "name": "Second item",
+          "code": 2
+        }
+      }
+    ]
+  },
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Apify : HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apify : HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Map Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map Fields": {
+      "main": [
+        [
+          {
+            "node": "Domain extractor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Domain extractor": {
+      "main": [
+        [
+          {
+            "node": "Hugging face : Summary Generator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hugging face : Summary Generator": {
+      "main": [
+        [
+          {
+            "node": "Clean Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean Summary": {
+      "main": [
+        [
+          {
+            "node": "Hugging Face : Email Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hugging Face : Email Draft": {
+      "main": [
+        [
+          {
+            "node": "Append rows in Lead sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "4c9b8212-e16f-4d84-9c30-449ef873345c",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "1fed84e624b1e2c83c6225c5eea93028a683a5b80244e69ff84d59ae36e5a734"
+  },
+  "id": "wGwzZssdikXbzV2z",
+  "tags": []
+}
